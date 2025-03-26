@@ -1,0 +1,433 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+<meta charset="UTF-8">
+<title>藝術作品評分系統</title>
+<link rel="icon" href="{{ url_for('static', filename='favicon.ico') }}">
+<link rel="stylesheet" href="//code.jquery.com/ui/1.12.1/themes/base/jquery-ui.css">
+<script src="https://ajax.googleapis.com/ajax/libs/jquery/3.5.1/jquery.min.js"></script>
+<script src="https://code.jquery.com/ui/1.12.1/jquery-ui.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+<style>
+/* Your CSS styles here */
+/* Example styles for the layout */
+body {
+    font-family: Arial, sans-serif;
+    margin: 0;
+    padding: 0;
+}
+header {
+    text-align: center;
+    padding: 15px 0;
+    margin-bottom: 0px; /* 減少 header 與 logo 之間的空白 */
+}
+.logo img {
+    max-width: 180px;
+    height: auto;
+}
+main {
+    display: flex;
+    justify-content: space-between;
+    padding: 0px 15px 0px;
+    flex-wrap: wrap; /* 允許內容換行 */
+}
+.radar-chart {
+  flex: 1;
+  margin-right: 0px;
+}
+.scrollable-content {
+  flex: 3;
+  overflow-y: auto;
+  border: 1px solid #ccc;
+  padding: 10px;
+  max-height: 520px; /* Adjust this value as needed */
+}
+.content {
+/* Your content styles here */
+}
+/* CSS to style the images */
+.img-container img {
+    width: 100px;
+    height: 100px;
+    margin: 10px;
+    cursor: grab;
+}
+#rankings {
+    margin-top: 20px;
+    padding: 10px;
+    border: 1px solid #ccc;
+}
+
+.hidden {
+    display: none;
+}
+
+#radarChart {
+    width: 550px !important;
+    height: 550px !important;
+    margin: 0 auto;
+}
+
+.image1 {
+    width: auto;
+    height: 520px;
+    margin: 0 auto; /* 將左右 margin 設為 auto 以實現水平置中 */
+    display: block; /* 讓圖片以 block 元素形式顯示 */
+}
+
+</style>
+</head>
+<body>
+<header> 
+  <!-- Logo -->
+  <div class="logo"> <img src="https://i.imgur.com/lSuLPYd.png" alt="Logo"> </div>
+</header>
+<main> 
+  <!-- 左邊雷達圖 -->
+  <!-- class="hidden" -->
+  <div class="radar-chart">
+    <div id="result" class="hidden"></div>
+    <div id="creativityScore" class="hidden"></div>
+   <div id="uploadResult" class="hidden"></div>
+   <div id="myImage">
+   <img class="image1" src="https://i.imgur.com/zmp9iJC.jpg">
+   </div>
+    <canvas id="radarChart"></canvas>
+  </div>
+  
+  <!-- 右邊題目 -->
+  <div class="scrollable-content">
+    <div id="hiddenDiv">
+      
+    <p>1.請上傳您的藝術作品</p>
+    <form id="uploadForm" enctype="multipart/form-data" action="/analyze" method="post">
+      <input type="file" id="imageInput" name="file" accept=".jpg, .jpeg, .png, .bmp">
+    </form>
+
+    <p>2.請將這些藝術作品進行排序，您覺得越具創意的作品往前排</p>
+    <div id="sortable" class="img-container"> 
+      <!-- Display the images --> 
+      
+      {% for link in imgur_links %} <img src="{{ link }}" alt="Random Image"> {% endfor %} 
+    </div>
+
+    <p>3.請回答以下問題後送出</p>
+    <!-- 顯示隨機題目的地方 -->
+    <div id="questionsContainer"></div>
+
+    
+
+    <br>
+    <button type="button" onclick="uploadImage()" id="showAnswersBtn">送出</button>
+    </div>
+    <!-- 按鈕觸發顯示錯誤答案 -->
+    <!-- 顯示錯誤答案的 div -->
+    <div id="resultDiv"></div>
+    
+
+
+  </div>
+  <script>
+    $(document).ready(function() {
+    $("#sortable").sortable();
+    $("#sortable").disableSelection();
+    });
+
+    let scores = {};
+    let formattedCreativityScore; // 定義 formattedCreativityScore 變數
+    let edgeScore;
+    let shapeScore;
+    let colorScore;
+
+    function uploadImage() {
+    var fileInput = document.getElementById('imageInput');
+    var file = fileInput.files[0];
+    var formData = new FormData();
+    formData.append('file', file);
+    const links = $("#sortable img").map(function() {
+        return $(this).attr('src');
+    }).get();
+
+    
+
+    // 上傳圖片及進行分析的兩個請求
+    const request1 = fetch('/', {
+        method: 'POST',
+        body: formData
+    });
+
+    const request2 = fetch('/analyze', {
+        method: 'POST',
+        body: formData
+    });
+
+    Promise.all([request1, request2])
+        .then(responses => Promise.all(responses.map(response => response.json())))
+        .then(dataArray => {
+            const resultDiv = document.getElementById('uploadResult');
+            colorScore = dataArray[0].ColorScore; // 使用全域變數賦值
+            resultDiv.innerText = `Color Score: ${colorScore}`;
+            
+            edgeScore = dataArray[1].EdgeScore; // 使用全域變數賦值
+            shapeScore = dataArray[1].ShapeScore; // 使用全域變數賦值
+            resultDiv.innerHTML += `
+                <p>Edge Score: ${edgeScore}</p>
+                <p>Shape Score: ${shapeScore}</p>
+            `;
+            scores = {
+            formattedCreativityScore,
+            edgeScore,
+            shapeScore,
+            colorScore
+            };
+
+            // 呼叫 submitAnswers() 並更新該函數的呼叫位置，確保它在 uploadImage() 之後被執行
+            submitAnswers();
+            toggleDiv();
+            updateRadarChart();
+            onButtonClick();
+        })
+        .catch(error => {
+            console.error('Error:', error);
+        });
+  
+    // 後續分析
+    $.ajax({
+        type: 'POST',
+        contentType: 'application/json;charset=UTF-8',
+        data: JSON.stringify({ order: links }),
+        url: '/sort',
+        success: function (response) {
+            if (response.status === 'success') {
+                const sortedImageRankings = response.sorted_image_rankings;
+                let rankingText = 'Image Rankings:<br>';
+                for (const link in sortedImageRankings) {
+                    rankingText += `<img src="${link}" alt="Image">: ${sortedImageRankings[link]}<br>`;
+                }
+                $("#rankings").html(rankingText);
+                const creativityScore = response.total_creativity_score;
+                formattedCreativityScore = creativityScore > 100 ? 100 : creativityScore; // 使用全域變數賦值
+                $("#creativityScore").html(`Creativity Score: ${formattedCreativityScore}`);
+            } else {
+                alert('Error fetching image rankings!');
+            }
+        },
+        error: function (error) {
+            alert("Error submitting order!");
+        }
+    });
+    const image = document.getElementById('myImage');
+    image.style.display = 'none'; // 隱藏圖片
+    // 在此處返回各變數的物件
+    scores = {
+        formattedCreativityScore,
+        edgeScore,
+        shapeScore,
+        colorScore
+    };
+}
+const questionsAndAnswers = [
+    // 問題和答案的陣列
+    {question: "Photoshop中的「圓形選擇工具」是用來做什麼的？", options: ["填滿圖形", "剪裁圖形", "選取圖形", "增加圖形透明度"], correctAnswer: "選取圖形"},
+{question: "Illustrator中哪個工具用來創建曲線？", options: ["鉛筆工具", "刷子工具", "筆刷工具", "形狀工具"], correctAnswer: "鉛筆工具"},
+{question: "在繪圖軟體中，何種圖層效果可以使圖像邊緣柔和化？", options: ["複製圖層", "濾鏡效果", "模糊效果", "色彩填充"], correctAnswer: "模糊效果"},
+{question: "在網頁設計中，哪種格式最常用於壓縮圖像以減少檔案大小？", options: ["JPEG", "TIFF", "BMP", "RAW"], correctAnswer: "JPEG"},
+{question: "在Photoshop中，哪個工具用來修復圖像中的瑕疵或細微的缺陷？", options: ["橡皮擦工具", "修補工具", "筆刷工具", "鉛筆工具"], correctAnswer: "修補工具"},
+{question: "哪種文件格式適用於保存帶有透明背景的圖像？", options: ["GIF", "JPEG", "TIFF", "BMP"], correctAnswer: "GIF"},
+{question: "在繪圖軟體中，哪個工具可以用來創建漸變效果？", options: ["混合工具", "矩形工具", "形狀工具", "漸變工具"], correctAnswer: "漸變工具"},
+{question: "在數位繪圖中，何種功能可以讓你記錄畫筆的筆壓？", options: ["筆刷流量", "筆刷形狀", "筆刷硬度", "筆刷散佈"], correctAnswer: "筆刷流量"},
+{question: "在Photoshop中，哪個功能可用來製作多個相同的圖層？", options: ["圖層合併", "圖層遮罩", "圖層複製", "圖層組合"], correctAnswer: "圖層複製"},
+{question: "Illustrator中的「群組」功能是用來做什麼的？", options: ["合併物件", "分離物件", "鎖定物件", "組織物件"], correctAnswer: "組織物件"},
+{question: "在繪圖軟體中，何種工具可以用來創建對稱圖案？", options: ["魔術棒工具", "色彩選擇工具", "對稱工具", "鉛筆工具"], correctAnswer: "對稱工具"},
+{question: "在數位繪圖中，何種功能可以用來調整圖像的明暗度？", options: ["濾鏡效果", "曝光調整", "色彩平衡", "剪裁工具"], correctAnswer: "曝光調整"},
+{question: "在電腦繪圖中，哪種格式最適合用來保存圖像的透明背景？", options: ["JPEG", "BMP", "PNG", "TIFF"], correctAnswer: "PNG"},
+{question: "在Photoshop中，哪個工具可以用來裁剪圖像？", options: ["筆刷工具", "選擇工具", "裁剪工具", "橡皮擦工具"], correctAnswer: "裁剪工具"},
+{question: "在數位繪圖中，何種技巧可以用來創建自然的筆觸效果？", options: ["壓力敏感", "魔術棒", "曲線工具", "形狀工具"], correctAnswer: "壓力敏感"},
+{question: "在繪圖軟體中，何種功能可以用來旋轉圖像？", options: ["反轉工具", "旋轉工具", "縮放工具", "裁剪工具"], correctAnswer: "旋轉工具"},
+{question: "在Photoshop中，哪個功能可用來調整圖像的色彩飽和度？", options: ["色相/飽和度", "色彩填充", "色調/曝光", "色彩平衡"], correctAnswer: "色相/飽和度"},
+{question: "在電腦繪圖中，哪種格式最適合用來保存具有多個圖層的圖像？", options: ["JPEG", "PNG", "TIFF", "GIF"], correctAnswer: "TIFF"},
+{question: "在Illustrator中，哪個功能可用來將多個物件合併為一個？", options: ["群組", "複製", "合併路徑", "轉換"], correctAnswer: "合併路徑"},
+{question: "在繪圖軟體中，何種功能可以用來調整畫布大小？", options: ["縮放工具", "畫布大小工具", "變形工具", "裁剪工具"], correctAnswer: "畫布大小工具"},
+{question: "在Photoshop中，哪個工具可用於創建遮罩？", options: ["選擇工具", "筆刷工具", "魔術棒工具", "橡皮擦工具"], correctAnswer: "筆刷工具"},
+{question: "在電腦繪圖中，哪種格式通常用於保存帶有動畫的圖像？", options: ["JPEG", "GIF", "TIFF", "PNG"], correctAnswer: "GIF"},
+{question: "在繪圖軟體中，何種功能可用於在圖像中添加文字？", options: ["文字工具", "筆刷工具", "形狀工具", "選擇工具"], correctAnswer: "文字工具"},
+{question: "在Illustrator中，哪個工具用來創建直線？", options: ["鉛筆工具", "線條工具", "形狀工具", "曲線工具"], correctAnswer: "線條工具"},
+{question: "在電腦繪圖中，何種功能可用於縮放圖像而不失真？", options: ["縮放工具", "變形工具", "拉伸工具", "裁剪工具"], correctAnswer: "縮放工具"},
+{question: "在Photoshop中，哪個功能用於將圖層透明度減少到50%？", options: ["色彩填充", "調整圖層", "圖層混合模式", "不透明度工具"], correctAnswer: "不透明度工具"},
+{question: "在繪圖軟體中，何種工具可用來模擬自然筆觸？", options: ["橡皮擦工具", "魔術棒工具", "曲線工具", "壓力敏感筆"], correctAnswer: "壓力敏感筆"},
+{question: "在數位繪圖中，何種功能可以用來增加或減少畫筆的硬度？", options: ["筆刷形狀", "筆刷流量", "筆刷散佈", "筆刷硬度"], correctAnswer: "筆刷硬度"},
+{question: "在Photoshop中，哪個工具可以用來移動選定區域的圖像？", options: ["移動工具", "轉換工具", "選擇工具", "筆刷工具"], correctAnswer: "移動工具"},
+{question: "在繪圖軟體中，何種功能可以用來填充特定區域的顏色？", options: ["染色工具", "筆刷工具", "填充工具", "漸層工具"], correctAnswer: "填充工具"},
+{question: "在電腦繪圖中，何種格式通常用於保存具有透明背景的圖像？", options: ["JPEG", "BMP", "PNG", "TIFF"], correctAnswer: "PNG"},
+{question: "在Photoshop中，哪個功能用於將不同圖層的元素合併？", options: ["合併圖層", "圖層遮罩", "群組圖層", "濾鏡效果"], correctAnswer: "合併圖層"},
+{question: "在數位繪圖中，何種功能可以用來模擬不同畫筆的形狀？", options: ["筆刷流量", "筆刷硬度", "筆刷形狀", "筆刷散佈"], correctAnswer: "筆刷形狀"},
+{question: "在繪圖軟體中，何種工具可以用來選擇特定顏色的區域？", options: ["色彩填充", "色彩選擇工具", "色相/飽和度", "漸層工具"], correctAnswer: "色彩選擇工具"},
+{question: "在Illustrator中，哪個工具用於創建曲線？", options: ["鉛筆工具", "筆刷工具", "形狀工具", "線條工具"], correctAnswer: "鉛筆工具"},
+{question: "在電腦繪圖中，何種格式最適合保存含有動畫的圖像？", options: ["JPEG", "PNG", "TIFF", "GIF"], correctAnswer: "GIF"},
+{question: "在繪圖軟體中，何種功能可以用來增加圖像的對比度？", options: ["色相/飽和度", "曝光調整", "色彩填充", "色彩平衡"], correctAnswer: "曝光調整"},
+{question: "在Photoshop中，哪個功能可用來調整圖像的色調和飽和度？", options: ["色彩填充", "色調/飽和度", "色彩平衡", "色相/飽和度"], correctAnswer: "色相/飽和度"},
+{question: "在Illustrator中，哪個工具用於創建矢量圖形？", options: ["鉛筆工具", "刷子工具", "形狀工具", "線條工具"], correctAnswer: "形狀工具"},
+{question: "在繪圖軟體中，何種功能可用來製作圖像的特定部分透明？", options: ["魔術棒工具", "不透明度工具", "選擇工具", "橡皮擦工具"], correctAnswer: "橡皮擦工具"},
+{question: "在 Procreate 中，哪個手勢用於取消上一步操作？", options: ["兩指點擊", "三指點擊", "長按", "雙指往左滑動"], correctAnswer: "三指點擊"},
+{question: "在 Procreate 中，何種功能可用來創建動畫？", options: ["Animation Assist", "Time-lapse Recording", "Playback", "插圖工具"], correctAnswer: "Animation Assist"},
+{question: "在 Procreate 中，哪個功能可用來自動將畫布翻轉到相應的角度？", options: ["自動轉向", "旋轉模式", "智能翻轉", "自動調整"], correctAnswer: "自動轉向"},
+{question: "在 Procreate 中，哪個工具用於選擇和移動圖層上的元素？", options: ["選擇工具", "移動工具", "編輯工具", "變形工具"], correctAnswer: "移動工具"},
+{question: "在 Procreate 中，哪個功能可用於創建可重複應用的筆刷效果？", options: ["筆刷設置", "筆刷捕捉", "筆刷庫", "筆刷樣式"], correctAnswer: "筆刷庫"},
+{question: "在 Procreate 中，哪個功能用於快速重複上一步操作？", options: ["預設筆劃", "快速繪圖", "筆劃重現", "連續繪圖"], correctAnswer: "筆劃重現"},
+{question: "在 Procreate 中，哪個功能可用於創建特殊視覺效果，如扭曲或反射？", options: ["特殊效果", "變形工具", "創建濾鏡", "涂鴉效果"], correctAnswer: "變形工具"},
+{question: "在 Procreate 中，哪個功能可用於記錄畫筆筆壓的變化？", options: ["筆刷樣式", "筆刷硬度", "筆刷流量", "筆刷動態"], correctAnswer: "筆刷動態"},
+{question: "在 Procreate 中，哪個功能可用於追蹤筆劃的繪製過程？", options: ["畫布錄製", "筆劃追蹤", "繪製錄影", "Time-lapse Recording"], correctAnswer: "畫布錄製"},
+{question: "在 Procreate 中，哪個功能可用於將不同圖層的元素組合起來？", options: ["圖層合併", "圖層複製", "圖層組合", "圖層遮罩"], correctAnswer: "圖層組合"},
+
+    
+
+];
+
+function displayRandomQuestions() {
+    const questionsContainer = document.getElementById('questionsContainer');
+    questionsContainer.innerHTML = '';
+
+    const selectedQuestions = getRandomQuestions(questionsAndAnswers, 10);
+
+    selectedQuestions.forEach((question, index) => {
+        const questionText = question.question;
+        const options = question.options;
+
+        const questionDiv = document.createElement('div');
+        questionDiv.innerHTML = `<p>${index + 1}. ${questionText}</p>`;
+
+        const optionsDiv = document.createElement('div');
+        options.forEach((option, optionIndex) => {
+            const optionInput = document.createElement('input');
+            optionInput.type = 'radio';
+            optionInput.name = `answer${index + 1}`;
+            optionInput.value = option;
+            optionsDiv.appendChild(optionInput);
+
+            const optionLabel = document.createElement('label');
+            optionLabel.textContent = option;
+            optionsDiv.appendChild(optionLabel);
+
+            optionsDiv.appendChild(document.createElement('br'));
+        });
+
+        questionDiv.appendChild(optionsDiv);
+        questionsContainer.appendChild(questionDiv);
+    });
+}
+
+function submitAnswers() {
+    const resultDiv = document.getElementById('resultDiv');
+    resultDiv.innerHTML = ''; // 清空之前的內容
+
+    let totalScore = 0;
+
+    questionsAndAnswers.forEach((question, index) => {
+        const questionText = question.question;
+        const options = question.options;
+        const correctAnswer = question.correctAnswer;
+
+        const selectedAnswer = document.querySelector(`input[name="answer${index + 1}"]:checked`);
+        let userAnswer = '';
+
+        if (selectedAnswer) {
+            userAnswer = selectedAnswer.value;
+            if (userAnswer === correctAnswer) {
+                totalScore += 10;
+            } else {
+                const resultText = document.createElement('div');
+                resultText.innerHTML = `${index + 1}: ${questionText}<br>你的答案： ${correctAnswer}<br>正確答案：${userAnswer}<br><br>`;
+                resultDiv.appendChild(resultText);
+            }
+        } else {
+            userAnswer = "You didn't select an answer";
+        }
+    });
+
+    const scoreElement = document.getElementById('result');
+    scoreElement.innerHTML += `Total Score: ${totalScore}/100`;
+
+    return {
+        totalScore,
+        formattedCreativityScore,
+        edgeScore,
+        shapeScore,
+        colorScore
+    };
+}
+
+// 點擊按鈕觸發顯示錯誤答案
+document.getElementById('showAnswersBtn').addEventListener('click', submitAnswers);
+
+// 頁面載入時顯示隨機題目
+window.onload = () => {
+    displayRandomQuestions();
+};
+    
+function getRandomQuestions(questions, count) {
+    const shuffled = questions.sort(() => 0.5 - Math.random());
+    return shuffled.slice(0, count);
+}
+
+
+function toggleDiv() {
+    const divToToggle = document.getElementById('hiddenDiv');
+    divToToggle.classList.toggle('hidden');
+}
+
+function updateRadarChart(dataValues) {
+        const ctx = document.getElementById('radarChart').getContext('2d');
+
+        const newData = {
+            labels: ['知識', '創意', '線條', '構圖', '配色'],
+            datasets: [{
+                label: '成績',
+                data: dataValues,
+                backgroundColor: 'rgba(255, 99, 132, 0.2)',
+                borderColor: 'rgba(255, 99, 132, 1)',
+                borderWidth: 1
+            }]
+        };
+
+        if (window.myRadarChart) {
+            window.myRadarChart.data.datasets.forEach((dataset, i) => {
+                dataset.data = newData.datasets[i].data;
+            });
+            window.myRadarChart.update();
+        } else {
+            window.myRadarChart = new Chart(ctx, {
+                type: 'radar',
+                data: newData,
+                options: {
+                      scale: {
+                          ticks: {
+                              min: 0 // 将最小值设置为0
+                          }
+                      }
+                  }
+            });
+        }
+    }
+
+    function onButtonClick() {
+    // 在 onButtonClick() 中調用 submitAnswers() 以獲取分數
+    const answers = submitAnswers();
+    console.log("Answers:", answers); // 印出提交的答案
+    console.log("Scores:", scores); // 印出分數對象
+    // 獲取 submitAnswers() 返回的答案，並使用全局變數中的分數資訊
+    const dataValues = [
+        answers.totalScore,
+        scores.formattedCreativityScore,
+        scores.edgeScore,
+        scores.shapeScore,
+        scores.colorScore
+    ];
+    console.log("Data Values:", dataValues); // 印出雷達圖數值
+    updateRadarChart(dataValues);
+    }
+
+
+      </script> 
+</main>
+</body>
+</html>
